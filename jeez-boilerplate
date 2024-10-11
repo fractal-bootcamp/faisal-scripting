@@ -1,0 +1,105 @@
+
+#!/bin/bash
+
+echo "Welcome to Jeez! Press Enter to start setting your project."
+sed -i '/"scripts"/a \  "dev": "vite",' package.jsonread
+
+# 1. Prompt for project name
+read -p "Enter your project name: " project_name
+mkdir "$project_name" && cd "$project_name" || { echo "Yikes! Failed to create project directory"; exit 1; }
+
+# 2. Initialize Git repository
+echo "Initializing git repo..."
+git init
+echo "# $project_name" > README.md
+git add README.md
+git commit -m "initial commit for $project_name"
+
+# 3. Create frontend and backend directories
+echo "Setting project directories..."
+mkdir frontend backend
+echo "Jeez! Directories created."
+
+# 4. Set up frontend
+read -p "Choose your frontend setup (or skip): " setup_frontend
+if [ "$setup_frontend" == "Vite-React" ]; then
+	cd frontend || exit
+	npm create vite@latest . -- --template react
+	npm install
+	# Add dev script to package.json
+	sed -i '/"scripts"/a \ "dev": "vite", ' package.json
+	echo "Jeez! Frontend setup complete."
+	cd ..
+else
+	echo "Skipping frontend setup."
+fi
+
+# 5. Set up backend
+read -p "Choose your backend setup (or skip): " setup_backend
+if [ "$setup_backend" == "Express" ]; then
+	cd backend || exit
+	npm init -y	
+	npm install express
+	# Add start script to package.json
+	sed -i '/"scripts"/a \  "start": "node index.js",' package.json
+	echo "Jeez! Backend setup complete."
+	cd ..
+else
+	echo "Skipping backend setup."
+fi
+
+# 6. Add Docker and PostgreSQL setup
+read -p "Do you want to set up a database? (y/n): " setup_db
+if [ "$setup_db" == "y" ]; then
+	cat <<EOL > docker-compose.yml
+version: '3.8'
+services:
+	db:
+	  image: postgres
+	  environment:
+	    POSTGRES_USER: myuser
+	    POSTGRES_PASSWORD: mypassword
+	    POSTGRES_DB: mydb
+	  ports:
+	    - "1001:5432"
+EOL
+	echo "Jeez! Database setup complete."
+else
+	echo "Skipping database setup."
+fi
+
+# 7. Set up ORM for backend
+read -p "Do you want to set up an ORM? (y/n): " setup_orm
+if [ "$setup_orm" == "y" ]; then
+	cd backend || exit
+	npx prisma init
+	npm install @prisma/client
+	npx prisma generate
+	echo "Jeez! ORM setup complete."
+	cd ..
+else
+	echo "Skipping ORM setup."
+fi
+
+# 8. Update .env.local file
+read -p "Do you want to create an .env.local file for database configuration? (y/n): " setup_env
+if [ "$setup_env" == "y" ]; then
+	echo "DATABASE_URL=postgresql://myuser:mypassword@localhost:1001/mydb" > .env.local
+	echo "Jeez! .env.local file created."
+else
+	echo "Skipping .env.local setup."
+fi
+
+#9. push to remote Git repository
+read -p "Do you want to set up a remote Git repository? (y/n): " setup_git
+if [ "$setup_git" == "y" ]; then
+	read -p "Enter the remote repo URL: " remote_url
+	git remote add origin "$remote_url"
+	git branch -M main
+	git push -u origin main
+	echo "Jeez! Git remote repo complete."
+else
+	echo "Skipping remote Git setup"
+fi
+
+echo "Jeeeez! Project setup ready, let's rip some code!"

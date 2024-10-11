@@ -102,4 +102,10 @@ else
 	echo "Skipping remote Git setup"
 fi
 
+<<<<<<< HEAD
 echo "Jeeeez! Project setup ready, let's rip some code!"
+=======
+echo "Jeeeez! Project setup ready, let's rip some code!"
+
+
+>>>>>>> e2146c0dd710ff8b0e294001f4737d14982225c8

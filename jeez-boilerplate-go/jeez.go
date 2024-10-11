@@ -9,6 +9,38 @@ import (
     "strings"
 )
 
+// Helper function to run external shell commands
+func runCommand(name string, arg ...string) error {
+    cmd := exec.Command(name, arg...)
+    cmd.Stdout = os.Stdout
+    cmd.Stdin = os.Stdin
+    cmd.Stderr = os.Stderr
+    if err := cmd.Run(); err != nil {
+        return fmt.Errorf("failed to execute %s: %w", name, err)
+    }
+    return nil
+}
+
+// Helper function to add a script to package.json
+func addPackageScript(dir string, script string) error {
+    filePath := dir + "/package.json"
+    if _, err := os.Stat(filePath); os.IsNotExist(err) {
+        return fmt.Errorf("package.json does not exist in %s", dir)
+    }
+
+    input, err := os.ReadFile(filePath)
+    if err != nil {
+        return fmt.Errorf("failed to read package.json: %w", err)
+    }
+
+    content := strings.Replace(string(input), `"scripts": {`, `"scripts": {`+"\n    "+script+",", 1)
+    if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+        return fmt.Errorf("failed to update package.json: %w", err)
+    }
+    fmt.Println("Successfully updated package.json with the new script.")
+    return nil
+}
+
 // Helper function to get a yes/no response from the user
 func getYesNoResponse(prompt string) bool {
     reader := bufio.NewReader(os.Stdin)
@@ -17,7 +49,7 @@ func getYesNoResponse(prompt string) bool {
         response, _ := reader.ReadString('\n')
         response = strings.TrimSpace(strings.ToLower(response))
 
-        if response == "y" {
+        if response == "y" || response == "" { // Treat empty input as "yes"
             return true
         } else if response == "n" {
             return false
@@ -167,7 +199,7 @@ func setupFrontend() error {
             if err := os.Chdir("frontend"); err != nil {
                 return fmt.Errorf("failed to change to frontend directory: %w", err)
             }
-            if err := runCommand("npm", "create", "vite@latest", ".", "--"); err != nil {
+            if err := runCommand("npm", "create", "vite@latest", "."); err != nil {
                 os.Chdir("..")
                 return fmt.Errorf("failed to create Vite project: %w", err)
             }
@@ -207,36 +239,40 @@ func setupBackend() error {
                 handleError("changing to backend directory", err)
                 return err
             }
+            // Create package.json file if it doesn't exist
             if err := runCommand("npm", "init", "-y"); err != nil {
                 os.Chdir("..")
                 handleError("initializing npm", err)
                 return err
             }
+            // Install necessary dependencies
             if err := runCommand("npm", "install", "express", "typescript", "@types/express", "ts-node", "nodemon"); err != nil {
                 os.Chdir("..")
                 handleError("installing backend dependencies", err)
                 return err
             }
+            // Create server.ts file
             if err := os.WriteFile("server.ts", []byte(`
-                import express, { Request, Response } from 'express';
+import express, { Request, Response } from 'express';
 
-                const app = express();
-                const PORT = 3000;
+const app = express();
+const PORT = 3000;
 
-                app.use(express.json());
+app.use(express.json());
 
-                app.get('/', (req: Request, res: Response) => {
-                    res.send('Hello, Jeez!');
-                });
+app.get('/', (req: Request, res: Response) => {
+    res.send('Hello, Jeez!');
+});
 
-                app.listen(PORT, () => {
-                    console.log("Server is running on http://localhost:" + PORT);
-                });
-            `), 0644); err != nil {
+app.listen(PORT, () => {
+    console.log("Server is running on http://localhost:" + PORT);
+});
+`), 0644); err != nil {
                 os.Chdir("..")
                 handleError("creating server.ts file", err)
                 return err
             }
+            // Add the start script to package.json
             if err := addPackageScript("backend", `"start": "nodemon server.ts"`); err != nil {
                 fmt.Println("Warning: Failed to add 'start' script to package.json:", err)
             }
@@ -253,7 +289,7 @@ func setupBackend() error {
 }
 
 // Step 6: Add Docker and PostgreSQL setup
-func setupDatabase() error {
+func setupDatabase(dirName string) error {
     if err := os.Chdir("backend"); err != nil {
         return fmt.Errorf("failed to change to backend directory: %w", err)
     }
@@ -263,17 +299,20 @@ func setupDatabase() error {
         return nil
     }
 
-    dockerComposeContent := `version: '3.8'
-        services:
-            db:
-                image: postgres
-                environment:
-                    POSTGRES_USER: myuser
-                    POSTGRES_PASSWORD: mypassword
-                    POSTGRES_DB: mydb
-                ports:
-                    - "1001:5432"
-    `
+    // Use the dirName to set the POSTGRES_DB name
+    dockerComposeContent := fmt.Sprintf(`version: '3.8'
+services:
+    postgres:
+      image: postgres:13
+      environment:
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+        POSTGRES_DB: %s_db
+      command: -c fsync=off -c full_page_writes=off -c synchronous_commit=off -c max_connections=500
+      ports:
+        - 10001:5432
+    `, dirName)
+
     if err := os.WriteFile("docker-compose.yml", []byte(dockerComposeContent), 0644); err != nil {
         os.Chdir("..")
         return fmt.Errorf("failed to write docker-compose.yml: %w", err)
@@ -316,17 +355,17 @@ func setupOrm() error {
     // Add datasource and basic model to schema.prisma
     prismaSchemaPath := "prisma/schema.prisma"
     datasourceAndModel := `
-        datasource db {
-            provider = "postgresql"
-            url      = env("DATABASE_URL")
-        }
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
 
-        model User {
-            id        String  @id @default(uuid())
-            email     String  @unique
-            firstName String
-            lastName  String
-        }
+model User {
+    id        String  @id @default(uuid())
+    email     String  @unique
+    firstName String
+    lastName  String
+}
     `
     if err := os.WriteFile(prismaSchemaPath, []byte(datasourceAndModel), 0644); err != nil {
         os.Chdir("..")
@@ -402,37 +441,6 @@ func setupGitRemote() error {
     return nil
 }
 
-// Helper function to run external shell commands
-func runCommand(name string, arg ...string) error {
-    cmd := exec.Command(name, arg...)
-    cmd.Stdout = os.Stdout
-    cmd.Stderr = os.Stderr
-    if err := cmd.Run(); err != nil {
-        return fmt.Errorf("failed to execute %s: %w", name, err)
-    }
-    return nil
-}
-
-// Helper function to add a script to package.json
-func addPackageScript(dir string, script string) error {
-    filePath := dir + "/package.json"
-    if _, err := os.Stat(filePath); os.IsNotExist(err) {
-        return fmt.Errorf("package.json does not exist in %s", dir)
-    }
-
-    input, err := os.ReadFile(filePath)
-    if err != nil {
-        return fmt.Errorf("failed to read package.json: %w", err)
-    }
-
-    content := strings.Replace(string(input), `"scripts": {`, `"scripts": {`+"\n    "+script+",", 1)
-    if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-        return fmt.Errorf("failed to update package.json: %w", err)
-    }
-    fmt.Println("Successfully updated package.json with the new script.")
-    return nil
-}
-
 ////// Main script //////
 func main() {
     welcomeMessage()
@@ -454,7 +462,7 @@ func main() {
         if err := setupBackend(); err != nil {
             handleError("setting up backend", err)
         }
-        if err := setupDatabase(); err != nil {
+        if err := setupDatabase(projectName); err != nil { // Pass projectName to setupDatabase
             handleError("setting up database", err)
         }
         if err := setupOrm(); err != nil {
